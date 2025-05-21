@@ -64,6 +64,16 @@ wss.on('connection', socket => {
       return;
     }
 
+    if (msg === 'TYPING:') {
+      // Broadcast to others only
+      for (let [client, name] of clients.entries()) {
+        if (client !== socket && client.readyState === WebSocket.OPEN) {
+          client.send(`[TYPING] ${nickname}`);
+        }
+      }
+      return;
+    }
+
     if (msg.startsWith('/admin ')) {
       const pw = msg.split(' ')[1];
       if (pw === ADMIN_PASSWORD) {

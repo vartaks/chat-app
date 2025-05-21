@@ -64,6 +64,13 @@ body {
   content: '🟢 ';
 }
 
+#typing-indicator {
+  font-style: italic;
+  font-size: 13px;
+  padding: 6px 12px;
+  color: #ccc;
+}
+
 .chat-container {
   flex: 1;
   display: flex;

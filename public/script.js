@@ -4,6 +4,20 @@ const input = document.getElementById('input');
 const userList = document.getElementById('user-list');
 
 let nickname = null;
+let typing = false;
+let typingTimeout;
+
+const typingNotice = document.createElement('div');
+typingNotice.id = 'typing-indicator';
+chat.after(typingNotice);
+
+function showTyping(name) {
+  typingNotice.textContent = `${name} is typing...`;
+  clearTimeout(typingTimeout);
+  typingTimeout = setTimeout(() => {
+    typingNotice.textContent = '';
+  }, 3000);
+}
 
 function appendMessage(text) {
   const msg = document.createElement('div');
@@ -37,6 +51,9 @@ socket.onmessage = e => {
       }
       userList.appendChild(li);
     });
+  } else if (message.startsWith('[TYPING]')) {
+    const name = message.replace('[TYPING]', '').trim();
+    if (name !== nickname) showTyping(name);
   } else {
     appendMessage(message);
   }
@@ -46,5 +63,11 @@ input.addEventListener('keypress', e => {
   if (e.key === 'Enter' && input.value.trim()) {
     socket.send(input.value.trim());
     input.value = '';
+  } else {
+    if (!typing) {
+      typing = true;
+      socket.send('TYPING:');
+      setTimeout(() => typing = false, 1000); // limit how often it's sent
+    }
   }
 });
