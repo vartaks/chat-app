@@ -64,7 +64,7 @@ input.addEventListener('keypress', e => {
     socket.send(input.value.trim());
     input.value = '';
   } else {
-    if (!typing) {
+    if (!typing && nickname) {
       typing = true;
       socket.send('TYPING:');
       setTimeout(() => typing = false, 1000); // limit how often it's sent
