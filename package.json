@@ -1,0 +1,23 @@
+{
+  "name": "chat-app-sjv",
+  "version": "1.0.0",
+  "description": "Chat Application using NodeJS",
+  "main": "main.js",
+  "dependencies": {
+    "body-parser": "^2.2.0",
+    "cookie-parser": "^1.4.7",
+    "express": "^5.1.0",
+    "multer": "^1.4.5-lts.2",
+    "rxjs": "^7.8.2",
+    "ws": "^8.18.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vartaks/chat-app.git"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Sourabh Vartak",
+  "license": "ISC"
+}
