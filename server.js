@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const WebSocket = require('ws');
 
-const clients = new Map(); // socket => nickname
+const clients = new Map(); // socket => { nickname: string, lastSeen: Date }
 const logStream = fs.createWriteStream('chat.log', { flags: 'a' });
 const ADMIN_PASSWORD = 'admin123';
 let adminSocket = null;
@@ -41,14 +41,22 @@ wss.on('connection', socket => {
   socket.on('message', msg => {
     msg = msg.toString().trim();
 
+    // Update last seen time for the user
+    if (nickname) {
+        const userInfo = clients.get(socket);
+        if (userInfo) {
+            userInfo.lastSeen = new Date();
+        }
+    }
+
     if (!nickname) {
       if ([...clients.values()].includes(msg)) {
         socket.send('Nickname taken. Try another:');
         return;
       }
       nickname = msg;
-      clients.set(socket, nickname);
-      socket.send(`Welcome ${nickname}! Use /list, /msg, /admin, /mute, /kick, etc.`);
+      clients.set(socket, { nickname: nickname, lastSeen: new Date() });
+      socket.send(`Welcome ${nickname}! Use /list, /msg, /admin, /mute, /kick, /lastseen etc.`);
       broadcast(`${nickname} joined the chat`, socket);
       broadcastUserList();
       return;
@@ -130,6 +138,19 @@ wss.on('connection', socket => {
       return;
     }
 
+    if (msg === '/lastseen') {
+        let lastSeenList = 'Last seen:\n';
+        for (let [clientSocket, userInfo] of clients.entries()) {
+            // For currently connected users, last seen is now
+            const status = clientSocket.readyState === WebSocket.OPEN ? 'Online' : `Last seen: ${userInfo.lastSeen.toLocaleString()}`;
+            lastSeenList += `- ${userInfo.nickname}: ${status}\n`;
+        }
+        // We need to store disconnected users to show their last seen. This requires a separate structure.
+        // For now, this will only show currently online users and their "last seen" as Online.
+        socket.send(lastSeenList);
+        return;
+    }
+
     if (muted.has(nickname)) {
       socket.send('You are muted.');
       return;
@@ -141,6 +162,13 @@ wss.on('connection', socket => {
   });
 
   socket.on('close', () => {
+    // Update last seen time when a user disconnects
+    const userInfo = clients.get(socket);
+    if (userInfo) {
+        userInfo.lastSeen = new Date();
+        // If we wanted to show last seen for disconnected users, we would move userInfo
+        // to a different structure here instead of deleting.
+    }
     clients.delete(socket);
     muted.delete(nickname);
     if (socket === adminSocket) adminSocket = null;
@@ -160,10 +188,14 @@ function broadcast(message, except) {
 }
 
 function broadcastUserList() {
-  const users = [...clients.values()].join(',');
+  const users = [...clients.values()].map(clientInfo => ({
+      nickname: clientInfo.nickname,
+      lastSeen: clientInfo.lastSeen.toISOString() // Send as ISO string
+  }));
+  const userListMessage = `[USERS]${JSON.stringify(users)}`;
   for (let client of wss.clients) {
     if (client.readyState === WebSocket.OPEN) {
-      client.send(`[USERS] ${users}`);
+      client.send(userListMessage);
     }
   }
 }

@@ -36,21 +36,31 @@ socket.onmessage = e => {
 
   // Check if it's a user list
   if (message.startsWith('[USERS]')) {
-    const names = message.replace('[USERS]', '').trim().split(',');
-    userList.innerHTML = '';
+    try {
+        const users = JSON.parse(message.replace('[USERS]', '').trim());
+        userList.innerHTML = '';
 
-    // 🟢 Update count
-    document.getElementById('user-count').textContent = `${names.length} user${names.length !== 1 ? 's' : ''} online`;
+        // 🟢 Update count
+        document.getElementById('user-count').textContent = `${users.length} user${users.length !== 1 ? 's' : ''} online`;
 
-    // 🟢 Update list
-    names.forEach(name => {
-      const li = document.createElement('li');
-      li.textContent = name === nickname ? `${name} (you)` : name;
-      if (name === nickname) {
-        li.classList.add('me'); // highlight class
-      }
-      userList.appendChild(li);
-    });
+        // 🟢 Update list
+        users.forEach(user => {
+            const li = document.createElement('li');
+            // Display nickname and last seen time
+            const lastSeenDate = new Date(user.lastSeen);
+            const statusText = user.nickname === nickname ? ' (you) - Online' : ` - Last seen: ${lastSeenDate.toLocaleString()}`;
+            li.textContent = `${user.nickname}${statusText}`;
+
+            if (user.nickname === nickname) {
+                li.classList.add('me'); // highlight class
+            }
+            userList.appendChild(li);
+        });
+    } catch (error) {
+        console.error("Failed to parse user list message:", error);
+        appendMessage("Error receiving user list.");
+    }
+
   } else if (message.startsWith('[TYPING]')) {
     const name = message.replace('[TYPING]', '').trim();
     if (name !== nickname) showTyping(name);
