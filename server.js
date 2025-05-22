@@ -165,8 +165,13 @@ wss.on('connection', socket => {
     }
 
     const message = `[${nickname}] ${msg}`;
-    broadcast(message, socket);
-    logMessage(message);
+
+    // Add timestamp to the message before broadcasting and logging
+    const now = new Date();
+    const formattedMessage = `[${now.toLocaleString()} -- ${nickname}] ${msg}`;
+
+    broadcast(formattedMessage, socket);
+    logMessage(formattedMessage);
   });
 
   socket.on('close', () => {
@@ -205,8 +210,8 @@ function broadcastUserList() {
 }
 
 function logMessage(msg) {
-  const time = new Date().toISOString();
-  logStream.write(`[${time}] ${msg}\n`);
+  // The message already contains the timestamp from the message handler
+  logStream.write(`${msg}\n`);
 }
 
 server.listen(3000, () => {
