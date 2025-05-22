@@ -33,6 +33,16 @@ const server = http.createServer((req, res) => {
 
 const wss = new WebSocket.Server({ server });
 
+// Helper function to update user's last seen timestamp
+function updateUserLastSeen(socket) {
+    const userInfo = clients.get(socket);
+    if (userInfo) {
+        userInfo.lastSeen = new Date();
+        // We should also rebroadcast the user list here to update the client view
+        broadcastUserList();
+    }
+}
+
 wss.on('connection', socket => {
   socket.send('Welcome! Enter your nickname:');
 
@@ -41,12 +51,9 @@ wss.on('connection', socket => {
   socket.on('message', msg => {
     msg = msg.toString().trim();
 
-    // Update last seen time for the user
+    // Update last seen time for any message received after nickname is set
     if (nickname) {
-        const userInfo = clients.get(socket);
-        if (userInfo) {
-            userInfo.lastSeen = new Date();
-        }
+        updateUserLastSeen(socket);
     }
 
     if (!nickname) {
@@ -153,6 +160,7 @@ wss.on('connection', socket => {
 
     if (muted.has(nickname)) {
       socket.send('You are muted.');
+      // The last seen is already updated at the beginning of the message handler
       return;
     }
 
@@ -163,12 +171,8 @@ wss.on('connection', socket => {
 
   socket.on('close', () => {
     // Update last seen time when a user disconnects
-    const userInfo = clients.get(socket);
-    if (userInfo) {
-        userInfo.lastSeen = new Date();
-        // If we wanted to show last seen for disconnected users, we would move userInfo
-        // to a different structure here instead of deleting.
-    }
+    // User info is not deleted until after this block, so we can still update last seen.
+    updateUserLastSeen(socket);
     clients.delete(socket);
     muted.delete(nickname);
     if (socket === adminSocket) adminSocket = null;
