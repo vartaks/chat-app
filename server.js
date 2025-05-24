@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -5,7 +7,7 @@ const WebSocket = require('ws');
 
 const clients = new Map(); // socket => { nickname: string, lastSeen: Date }
 const logStream = fs.createWriteStream('chat.log', { flags: 'a' });
-const ADMIN_PASSWORD = 'admin123';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 let adminSocket = null;
 const muted = new Set();
 
