@@ -2,12 +2,12 @@ const WebSocket = require('ws');
 const { clients, logStream, muted, adminSocket } = require('./chatState');
 
 // Helper function to update user's last seen timestamp
-function updateUserLastSeen(socket) {
+function updateUserLastSeen(socket, wss) {
     const userInfo = clients.get(socket);
     if (userInfo) {
         userInfo.lastSeen = new Date();
         // We should also rebroadcast the user list here to update the client view
-        broadcastUserList();
+        broadcastUserList(wss);
     }
 }
 

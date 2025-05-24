@@ -17,7 +17,7 @@ function initializeWebSocketServer(server) {
 
       // Update last seen time for any message received after nickname is set
       if (nickname) {
-          updateUserLastSeen(socket);
+          updateUserLastSeen(socket, wss);
       }
 
       if (!nickname) {
@@ -139,7 +139,7 @@ function initializeWebSocketServer(server) {
     socket.on('close', () => {
       // Update last seen time when a user disconnects
       // User info is not deleted until after this block, so we can still update last seen.
-      updateUserLastSeen(socket);
+      updateUserLastSeen(socket, wss);
       clients.delete(socket);
       muted.delete(nickname);
       if (socket === adminSocket) adminSocket = null;
