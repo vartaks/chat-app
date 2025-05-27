@@ -126,3 +126,9 @@ To Test:
 3. Try:
 /admin admin123 to become admin
 /list, /msg, /kick, etc.
+
+---------------------
+
+Switching testing frameworks involves installing new dependencies and rewriting the tests in the new framework's syntax, including adapting the mocking strategy. 
+Mocha itself doesn't come with built-in mocking like Jest, so we'll need additional libraries for that. 
+A common combination with Mocha is Chai for assertions, Sinon for spies, stubs, and mocks, and potentially Proxyquire for mocking require calls.

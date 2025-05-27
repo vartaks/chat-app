@@ -1,153 +1,223 @@
 const WebSocket = require('ws');
-const { clients, ADMIN_PASSWORD, adminSocket, muted } = require('./chatState');
+const chatState = require('./chatState');
 const { updateUserLastSeen, broadcast, broadcastUserList, logMessage } = require('./chatHelpers');
 
-let wss = null;
-
-function initializeWebSocketServer(server) {
-  wss = new WebSocket.Server({ server });
-
-  wss.on('connection', socket => {
+// Core function to handle new connection and initial setup
+function handleNewConnection(socket, wss) {
     socket.send('Welcome! Enter your nickname:');
 
-    let nickname = null;
+    // Store a temporary state on the socket until nickname is set
+    socket.tempNickname = null;
 
-    socket.on('message', msg => {
-      msg = msg.toString().trim();
+    socket.on('message', (msg) => {
+        handleMessage(socket, msg, wss);
+    });
 
-      // Update last seen time for any message received after nickname is set
-      if (nickname) {
-          updateUserLastSeen(socket, wss);
-      }
+    socket.on('close', () => {
+        handleDisconnection(socket, wss);
+    });
 
-      if (!nickname) {
-        if ([...clients.values()].some(client => client.nickname === msg)) {
-          socket.send('Nickname taken. Try another:');
-          return;
+    socket.on('error', (error) => {
+        console.error('WebSocket error:', error);
+        // Optionally close the socket on error
+        socket.close();
+    });
+}
+
+// Core function to handle incoming messages (including nickname and commands)
+function handleMessage(socket, msg, wss) {
+    msg = msg.toString().trim();
+    const clientInfo = chatState.clients.get(socket);
+    let nickname = clientInfo ? clientInfo.nickname : socket.tempNickname;
+
+    // Update last seen time for any message received after nickname is set
+    if (nickname && clientInfo) { // Check clientInfo exists to ensure nickname is fully set in state
+        updateUserLastSeen(socket, wss);
+    }
+
+    if (!nickname) {
+        // This is the first message, treat as nickname
+        if ([...chatState.clients.values()].some(client => client.nickname === msg)) {
+            socket.send('Nickname taken. Try another:');
+            return;
         }
-        nickname = msg;
-        clients.set(socket, { nickname: nickname, lastSeen: new Date() });
+        nickname = msg; // Set the nickname temporarily on the socket
+        chatState.clients.set(socket, { nickname: nickname, lastSeen: new Date() });
+        // Remove the temporary nickname property
+        delete socket.tempNickname;
+
         socket.send(`Welcome ${nickname}! Use /list, /msg, /admin, /mute, /kick, /lastseen etc.`);
         broadcast(`${nickname} joined the chat`, socket, wss);
         broadcastUserList(wss);
         return;
-      }
+    }
 
-      if (msg.toLowerCase() === 'exit') {
-        socket.close();
-        return;
-      }
-
-      if (msg === '/list') {
-        socket.send('Online: ' + [...clients.values()].map(client => client.nickname).join(', '));
-        return;
-      }
-
-      if (msg === 'TYPING:') {
-        // Broadcast to others only
-        for (let [client, name] of clients.entries()) {
-          if (client !== socket && client.readyState === WebSocket.OPEN) {
-            client.send(`[TYPING] ${nickname}`);
-          }
-        }
-        return;
-      }
-
-      if (msg.startsWith('/admin ')) {
-        const pw = msg.split(' ')[1];
-        if (pw === ADMIN_PASSWORD) {
-          adminSocket = socket;
-          socket.send('You are now the admin.');
-        } else {
-          socket.send('Wrong password.');
-        }
-        return;
-      }
-
-      if (msg.startsWith('/kick ')) {
-        if (socket !== adminSocket) return socket.send('Admin only.');
-        const target = msg.split(' ')[1];
-        const targetSocket = [...clients.entries()].find(([_, clientInfo]) => clientInfo.nickname === target)?.[0];
-        if (targetSocket) {
-          targetSocket.send('You have been kicked.');
-          targetSocket.close();
-        } else {
-          socket.send('User not found.');
-        }
-        return;
-      }
-
-      if (msg.startsWith('/mute ')) {
-        if (socket !== adminSocket) return socket.send('Admin only.');
-        const name = msg.split(' ')[1];
-        muted.add(name);
-        broadcast(`${name} has been muted.`, socket, wss);
-        return;
-      }
-
-      if (msg.startsWith('/unmute ')) {
-        if (socket !== adminSocket) return socket.send('Admin only.');
-        const name = msg.split(' ')[1];
-        muted.delete(name);
-        broadcast(`${name} has been unmuted.`, socket, wss);
-        return;
-      }
-
-      if (msg.startsWith('/msg ')) {
-        const parts = msg.split(' ');
-        const target = parts[1];
-        const text = parts.slice(2).join(' ');
-        const targetSocket = [...clients.entries()].find(([_, clientInfo]) => clientInfo.nickname === target)?.[0];
-        if (targetSocket) {
-          const formatted = `[Private] ${nickname}: ${text}`;
-          targetSocket.send(formatted);
-          socket.send('(to ' + target + '): ' + text);
-          logMessage(formatted);
-        } else {
-          socket.send('User not found.');
-        }
-        return;
-      }
-
-      if (msg === '/lastseen') {
-          let lastSeenList = 'Last seen:\n';
-          for (let [clientSocket, userInfo] of clients.entries()) {
-              // For currently connected users, last seen is now
-              const status = clientSocket.readyState === WebSocket.OPEN ? 'Online' : `Last seen: ${userInfo.lastSeen.toLocaleString()}`;
-              lastSeenList += `- ${userInfo.nickname}: ${status}\n`;
-          }
-          // We need to store disconnected users to show their last seen. This requires a separate structure.
-          // For now, this will only show currently online users and their "last seen" as Online.
-          socket.send(lastSeenList);
-          return;
-      }
-
-      if (muted.has(nickname)) {
-        socket.send('You are muted.');
-        // The last seen is already updated at the beginning of the message handler
-        return;
-      }
-
-      // Add timestamp to the message before broadcasting and logging
-      const now = new Date();
-      const formattedMessage = `[${now.toLocaleString()} -- ${nickname}] ${msg}`;;
-
-      broadcast(formattedMessage, socket, wss);
-      logMessage(formattedMessage);
-    });
-
-    socket.on('close', () => {
-      // Update last seen time when a user disconnects
-      // User info is not deleted until after this block, so we can still update last seen.
-      updateUserLastSeen(socket, wss);
-      clients.delete(socket);
-      muted.delete(nickname);
-      if (socket === adminSocket) adminSocket = null;
-      broadcast(`${nickname} has left the chat.`, null, wss);
-      broadcastUserList(wss);
-      logMessage(`${nickname} disconnected.`);
-    });
-  });
+    // If nickname is set, process as a regular message or command
+    processChatMessage(socket, nickname, msg, wss);
 }
 
-module.exports = { initializeWebSocketServer }; 
+// Core function to process chat messages and commands
+function processChatMessage(socket, nickname, msg, wss) {
+    const parts = msg.split(' ');
+    const command = parts[0].toLowerCase();
+
+    if (msg.toLowerCase() === 'exit') {
+        socket.close();
+        return;
+    }
+
+    switch (command) {
+        case '/list':
+            socket.send('Online: ' + [...chatState.clients.values()].map(client => client.nickname).join(', '));
+            break;
+        case 'typing:': // Handle TYPING: message
+             // Broadcast to others only
+            for (let [client, name] of chatState.clients.entries()) {
+              if (client !== socket && client.readyState === WebSocket.OPEN) {
+                client.send(`[TYPING] ${nickname}`);
+              }
+            }
+            break;
+        case '/admin':
+            handleAdminCommand(socket, parts[1]);
+            break;
+        case '/kick':
+            handleKickCommand(socket, parts[1], wss);
+            break;
+        case '/mute':
+            handleMuteCommand(socket, parts[1], wss);
+            break;
+        case '/unmute':
+             handleUnmuteCommand(socket, parts[1], wss);
+             break;
+        case '/msg':
+            handlePrivateMessage(socket, nickname, parts, wss);
+            break;
+         case '/lastseen':
+             handleLastSeenCommand(socket);
+             break;
+        default:
+            // Handle regular chat message if not muted
+            if (chatState.muted.has(nickname)) {
+                socket.send('You are muted.');
+                // last seen already updated at the beginning of handleMessage
+            } else {
+                 // Add timestamp to the message before broadcasting and logging
+                const now = new Date();
+                const formattedMessage = `[${now.toLocaleString()} -- ${nickname}] ${msg}`;;
+
+                broadcast(formattedMessage, socket, wss);
+                logMessage(formattedMessage);
+            }
+            break;
+    }
+}
+
+// Core function to handle admin command
+function handleAdminCommand(socket, password) {
+    if (password === chatState.ADMIN_PASSWORD) {
+        chatState.adminSocket = socket;
+        socket.send('You are now the admin.');
+    } else {
+        socket.send('Wrong password.');
+    }
+}
+
+// Core function to handle kick command
+function handleKickCommand(socket, targetNickname, wss) {
+    if (socket !== chatState.adminSocket) return socket.send('Admin only.');
+    const targetSocketEntry = [...chatState.clients.entries()].find(([_, clientInfo]) => clientInfo.nickname === targetNickname);
+    if (targetSocketEntry) {
+        const [targetSocket, _] = targetSocketEntry;
+        targetSocket.send('You have been kicked.');
+        targetSocket.close(); // This will trigger the close handler for the kicked user
+    } else {
+        socket.send('User not found.');
+    }
+}
+
+// Core function to handle mute command
+function handleMuteCommand(socket, targetNickname, wss) {
+     if (socket !== chatState.adminSocket) return socket.send('Admin only.');
+     chatState.muted.add(targetNickname);
+     broadcast(`${targetNickname} has been muted.`, socket, wss);
+}
+
+// Core function to handle unmute command
+function handleUnmuteCommand(socket, targetNickname, wss) {
+    if (socket !== chatState.adminSocket) return socket.send('Admin only.');
+    chatState.muted.delete(targetNickname);
+    broadcast(`${targetNickname} has been unmuted.`, socket, wss);
+}
+
+// Core function to handle private message command
+function handlePrivateMessage(socket, senderNickname, parts, wss) {
+    const target = parts[1];
+    const text = parts.slice(2).join(' ');
+    const targetSocketEntry = [...chatState.clients.entries()].find(([_, clientInfo]) => clientInfo.nickname === target);
+    if (targetSocketEntry) {
+        const [targetSocket, _] = targetSocketEntry;
+        const formatted = `[Private] ${senderNickname}: ${text}`;
+        targetSocket.send(formatted);
+        socket.send('(to ' + target + '): ' + text);
+        logMessage(formatted);
+    } else {
+        socket.send('User not found.');
+    }
+}
+
+// Core function to handle lastseen command
+function handleLastSeenCommand(socket) {
+    let lastSeenList = 'Last seen:\n';
+    for (let [clientSocket, userInfo] of chatState.clients.entries()) {
+        // For currently connected users, last seen is now
+        const status = clientSocket.readyState === WebSocket.OPEN ? 'Online' : `Last seen: ${userInfo.lastSeen.toLocaleString()}`;
+        lastSeenList += `- ${userInfo.nickname}: ${status}\n`;
+    }
+    // Note: This still only shows currently connected users as Online.
+    // Tracking disconnected users' last seen would require persisting their info.
+    socket.send(lastSeenList);
+}
+
+// Core function to handle user disconnection
+function handleDisconnection(socket, wss) {
+    // Update last seen time when a user disconnects
+    updateUserLastSeen(socket, wss); // Called before removing from clients
+
+    const clientInfo = chatState.clients.get(socket);
+    let nickname = clientInfo ? clientInfo.nickname : 'A user'; // Use nickname if available, default otherwise
+
+    chatState.clients.delete(socket);
+    // If the disconnected user was muted, remove them from the muted set
+    if (clientInfo && chatState.muted.has(clientInfo.nickname)) {
+        chatState.muted.delete(clientInfo.nickname);
+    }
+
+    // If the disconnected user was the admin, reset adminSocket
+    if (socket === chatState.adminSocket) {
+        chatState.adminSocket = null; // Reset the mutable adminSocket
+    }
+
+    broadcast(`${nickname} has left the chat.`, null, wss); // Broadcast to all remaining users
+    broadcastUserList(wss);
+    logMessage(`${nickname} disconnected.`);
+}
+
+// Initialization function to set up the WebSocket server
+function initializeWebSocketServer(server) {
+    const wss = new WebSocket.Server({ server });
+
+    wss.on('connection', socket => {
+        handleNewConnection(socket, wss);
+    });
+
+    // We might need a way to access the wss instance from core functions if they need it for broadcasting etc.
+    // Currently, wss is passed as an argument to the handlers and core functions.
+    // If more direct access is needed in other parts of chatServer.js, we might need to export it.
+
+    // Return the wss instance if needed by main.js or other parts of the app
+    // For testing, having wss available could be useful.
+     return wss; // Returning wss for potential external use/testing
+}
+
+module.exports = { initializeWebSocketServer, handleNewConnection, handleMessage, processChatMessage, handleAdminCommand, handleKickCommand, handleMuteCommand, handleUnmuteCommand, handlePrivateMessage, handleLastSeenCommand, handleDisconnection }; 
