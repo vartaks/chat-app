@@ -10,11 +10,15 @@ function handleNewConnection(socket, wss) {
     socket.tempNickname = null;
 
     socket.on('message', (msg) => {
-        handleMessage(socket, msg, wss);
+        // Always pass a Buffer to handleMessage for test and runtime consistency
+        if (!(msg instanceof Buffer)) {
+            msg = Buffer.from(msg);
+        }
+        module.exports.handleMessage(socket, msg, wss);
     });
 
     socket.on('close', () => {
-        handleDisconnection(socket, wss);
+        module.exports.handleDisconnection(socket, wss);
     });
 
     socket.on('error', (error) => {
@@ -30,11 +34,6 @@ function handleMessage(socket, msg, wss) {
     const clientInfo = chatState.clients.get(socket);
     let nickname = clientInfo ? clientInfo.nickname : socket.tempNickname;
 
-    // Update last seen time for any message received after nickname is set
-    if (nickname && clientInfo) { // Check clientInfo exists to ensure nickname is fully set in state
-        updateUserLastSeen(socket, wss);
-    }
-
     if (!nickname) {
         // This is the first message, treat as nickname
         if ([...chatState.clients.values()].some(client => client.nickname === msg)) {
@@ -49,11 +48,17 @@ function handleMessage(socket, msg, wss) {
         socket.send(`Welcome ${nickname}! Use /list, /msg, /admin, /mute, /kick, /lastseen etc.`);
         broadcast(`${nickname} joined the chat`, socket, wss);
         broadcastUserList(wss);
+        updateUserLastSeen(socket, wss); // Ensure updateUserLastSeen is called after setting nickname
         return;
     }
 
+    // Update last seen time for any message received after nickname is set
+    if (nickname && clientInfo) { // Check clientInfo exists to ensure nickname is fully set in state
+        updateUserLastSeen(socket, wss);
+    }
+
     // If nickname is set, process as a regular message or command
-    processChatMessage(socket, nickname, msg, wss);
+    module.exports.processChatMessage(socket, nickname, msg, wss);
 }
 
 // Core function to process chat messages and commands
@@ -79,22 +84,22 @@ function processChatMessage(socket, nickname, msg, wss) {
             }
             break;
         case '/admin':
-            handleAdminCommand(socket, parts[1]);
+            module.exports.handleAdminCommand(socket, parts[1]);
             break;
         case '/kick':
-            handleKickCommand(socket, parts[1], wss);
+            module.exports.handleKickCommand(socket, parts[1], wss);
             break;
         case '/mute':
-            handleMuteCommand(socket, parts[1], wss);
+            module.exports.handleMuteCommand(socket, parts[1], wss);
             break;
         case '/unmute':
-             handleUnmuteCommand(socket, parts[1], wss);
+             module.exports.handleUnmuteCommand(socket, parts[1], wss);
              break;
         case '/msg':
-            handlePrivateMessage(socket, nickname, parts, wss);
+            module.exports.handlePrivateMessage(socket, nickname, parts, wss);
             break;
          case '/lastseen':
-             handleLastSeenCommand(socket);
+             module.exports.handleLastSeenCommand(socket);
              break;
         default:
             // Handle regular chat message if not muted
@@ -181,11 +186,15 @@ function handleLastSeenCommand(socket) {
 
 // Core function to handle user disconnection
 function handleDisconnection(socket, wss) {
-    // Update last seen time when a user disconnects
     updateUserLastSeen(socket, wss); // Called before removing from clients
 
     const clientInfo = chatState.clients.get(socket);
-    let nickname = clientInfo ? clientInfo.nickname : 'A user'; // Use nickname if available, default otherwise
+    let nickname = 'A user';
+    if (clientInfo && clientInfo.nickname) {
+        nickname = clientInfo.nickname;
+    } else if (socket.tempNickname) {
+        nickname = socket.tempNickname;
+    }
 
     chatState.clients.delete(socket);
     // If the disconnected user was muted, remove them from the muted set
